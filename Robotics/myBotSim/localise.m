@@ -157,7 +157,8 @@ rotation=[];
 travelto=[0,0];
 while(converged == 0 && n < maxNumOfIterations) %%particle filter loop
     n = n+1; %increment the current number of iterations
-    botScan = botSim.ultraScan(); %get a scan from the real robot.
+%     botScan = botSim.ultraScan(); %get a scan from the real robot.
+    botScan = scannertest(scannum);
     [maxbS,maxbI]=max(botScan);   %identify index with max 
 
     %% Write code for updating your particles scans
@@ -306,7 +307,7 @@ while(converged == 0 && n < maxNumOfIterations) %%particle filter loop
     end 
     
     %% Write code to decide how to move next
-    confident=0; %robot always starts without confidence
+    %confident=0; %robot always starts without confidence
                 %Robot is shy and introverted
     if and(xydistrib<1, sum(variance<30)==2)
         confident =1; % the bot knows where it is! I hope
@@ -380,7 +381,8 @@ while(converged == 0 && n < maxNumOfIterations) %%particle filter loop
 %         else
 %             move=min([Zdist,wall_tolerance-1]);
 %         end
-        move=min([Zdist,wall_tolerance-1]);
+        %move=min([Zdist,wall_tolerance-1]);
+        move=Zdist;
         
         if botSim.debug()
             disp('attempting to move to')
@@ -414,11 +416,15 @@ while(converged == 0 && n < maxNumOfIterations) %%particle filter loop
             
     end
 
-    botSim.turn(turn); %turn the real robot.  
-    botSim.move(move); %move the real robot. These movements are recorded for marking 
+    
+    particle_turn = turn_bot(turn)
+    particle_dist = move_bot(move)
+    
+%     botSim.turn(turn); %turn the real robot.  
+%     botSim.move(move); %move the real robot. These movements are recorded for marking 
     for i =1:num %for all the particles. 
-        particles(i).turn(turn); %turn the particle in the same way as the real robot
-        particles(i).move(move); %move the particle in the same way as the real robot
+        particles(i).turn(particle_turn); %turn the particle in the same way as the real robot
+        particles(i).move(particle_dist); %move the particle in the same way as the real robot
     end
     
     if ~botSim.insideMap() %robot is outside 
