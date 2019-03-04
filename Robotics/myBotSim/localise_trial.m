@@ -31,131 +31,148 @@ botSim.setMap(modifiedMap);
 targetp=BotSim(modifiedMap);
 targetp.setBotPos(target);
 
+scannum = 6;
+botSim.setScanConfig(botSim.generateScanConfig(scannum)); 
+cycle=0;
+num =300; % number of particles
+clusnum=floor(size(map,1)/2)-1; %assumed number of clusters
+if clusnum<2
+    clusnum=2;
+end
+
+
 isolated=1;
 while isolated==1
+    
     %generate some random particles inside the map
-    num =300; % number of particles
+    
     particles(num,1) = BotSim; %how to set up a vector of objects
+    position=[];
+    heading=[];
+    
     for i = 1:num
         particles(i) = BotSim(modifiedMap);  %each particle should use the same map as the botSim object
         particles(i).randomPose(0); %spawn the particles in random locations
-    end
-
-    position=[];
-    heading=[];
-    clusnum=floor(size(map,1)/2)-1; %assumed number of clusters
-    if clusnum<2
-        clusnum=2;
-    end
-    
-    for i=1:num
         position=[position;particles(i).getBotPos()];
         heading=[heading;particles(i).getBotAng()];
     end
     
     [clusindex, roompos]=kmeans(position,clusnum); %split particles into clusters and get rooms
-
+    
+    if botSim.debug()
+        disp('clustering')
+        clusnum
+        num
+        roompos
+    end
+    
     adjacent=zeros(clusnum);
-    n=100;
-    R=5;
+    
     for j=1:clusnum
         for i=1:clusnum
             if i==j
                 score=0;
             else
-                %Find the midpoint and determine if it can "see" its parents
-                
-                midpoint=(roompos(i,:)+roompos(j,:))/2; 
+                %determine if rooms can "see" each other            
                 newparticle=BotSim(modifiedMap);
-                newparticle.setBotPos(midpoint);
-                C=roompos(i,:)-midpoint;
-                Cnorm=C/norm(C);
-                theta=atan(Cnorm(2)/Cnorm(1));
-                if Cnorm(1)<0
-                    theta=theta+pi();
-                end
+                newparticle.setBotPos(roompos(j,:));
+                C=roompos(i,:)-roompos(j,:);
+                dist=norm(C)
+                theta=atan2(C(2),C(1));
                 newparticle.setBotAng(theta);
                 pscan=newparticle.ultraScan();
-                if pscan(1)>=norm(roompos(i,:)-midpoint)
-                    score1=1;
+                if pscan(1)>=dist
+                    score=1;
                 else
-                    score1=0;
+                    score=0;
                 end
-                %I can just use pscan(3) but I was thinking of expanding
-                %code further
-                
-                D=roompos(j,:)-midpoint;
-                Dnorm=D/norm(D);
-                thetad=acos(Dnorm(1));
-                if Dnorm(1)<0
-                    thetad=thetad+pi();
-                end
-                newparticle.setBotAng(thetad);
-                pscan=newparticle.ultraScan();
-                if pscan(1)>=norm(roompos(j,:)-midpoint)
-                    score2=1;
-                else
-                    score2=0;
-                end
-                score=score1*score2;
             end
-        adjacent(i,j)=score;
+            adjacent(i,j)=score;
         end
     end
+            
     A=sum(adjacent, 2);
     if find(A==0) %a "room" is isolated. increase clusters
+        if botSim.debug()
+            disp('isolated')
+            adjacent
+        end
         clusnum=clusnum+1;
+        num=num+50;
     else
         isolated=0;
     end
     
+    [targetdist, targetroom]=min(pdist2(roompos,target)); %find out which room target is in
+    E=roompos(targetroom,:)-target;
+    Enorm=E/norm(E);
+    theta=atan2(Enorm(2),Enorm(1));
+    targetp.setBotAng(theta);
+    pscan=targetp.ultraScan();
+    if pscan(1)<=norm(target-roompos(targetroom,:))
+        if botSim.debug()
+            disp('target misplaced')
+        end
+        %target is in the wrong room!
+        clusnum=clusnum+1;
+        num=num+50;
+        isolated=1; %redo reseed
+    end
+    
 end
-roompos
-adjacent
 
+if botSim.debug()
+    roompos
+    adjacent
+end
+
+% just some dummy particles so I can see rooms
 roomparts(num,1) = BotSim;
 for i=1:size(roompos,1)
     roomparts(i)=BotSim(modifiedMap);
-    roomparts(i).setBotPos(roompos(i,:));
+    roomparts(i).setBotPos(roompos(i,:)); 
 end
 
+% do wavefront/djvorak here
+visited=[];
+unvisited=1:size(roompos,1);
+current=targetroom;
+distancematrix=squareform(pdist(roompos));
+djmatrix=zeros(size(roompos));%not really but they are same size
+djmatrix(:,1)=Inf;
+djmatrix(current,1)=0;
 
-%HOW DO I CONNECT THE ROOMS
-% midpoints=zeros(clusnum,clusnum,2);
-% passable=zeros(clusnum);
-% for j=1:clusnum
-%     for i=1:clusnum
-%         if i==j
-%             midpoint=[0,0];
-%         else
-%             midpoint=(roompos(i,:)+roompos(j,:))/2;
-%         end
-%         
-%         midpoints(i,j,:)=[midpoint];
-%     end
-% end
-% 
-% n=100;
-% R = 5;
-% score=zeros(size(midpoints,1),1);
-% newparticle=BotSim(modifiedMap);
-% for i=1:size(midpoints,1)
-%     t = 2*pi * rand(n,1);
-%     r = R*sqrt(rand(n,1));
-%     points = midpoints(i,:)+[r.*cos(t), r.*sin(t)];
-%     for j=1:size(points,1)        
-%         newparticle.setBotPos(points(j,:));
-%         if newparticle.insideMap()
-%             score(i)=score(i)+1;
-%         end
-%     end
-% end
-% 
-% score=score/n;
+while ~isempty(unvisited)
+    %djorak
+    if botSim.debug()
+        disp('pathing')
+        unvisited
+    end
+    [dist, index]=min(djmatrix(unvisited,1)); %find minimum dist in unvisited
+    current=unvisited(index);
+    visitlist=find(adjacent(current,:)); %gives indexes adjacent to current
+    [value, index]=intersect(visitlist,visited);
+    visitlist(index)=[]; %kill off nodes already visited
+    totaldistance=dist+distancematrix(current,visitlist);
+    
+    for index=find(totaldistance'<djmatrix(visitlist,1));
+        djmatrix(visitlist(index),1)=totaldistance(index);
+        djmatrix(visitlist(index),2)=current;
+    end
+    
+    visited=[visited;current]
+    unvisited(unvisited==current)=[]   
+end
+    
+    
+    
+    
 
-[targetdist, targetroom]=min(pdist2(roompos,target)); %find out which room target is in
 
-maxNumOfIterations = 30;
+%find shortest distance to targetroom
+
+
+maxNumOfIterations = 50;
 n = 0;
 converged =0; %The filter has not converged yet
 particleScan=[];
@@ -167,7 +184,11 @@ while(converged == 0 && n < maxNumOfIterations) %%particle filter loop
     [maxbS,maxbI]=max(botScan);   %identify index with max 
 
     %% Write code for updating your particles scans
+    if botSim.debug()
+        disp('scanning')
+    end
     for i =1:num %for all the particles. 
+        particles(i).setScanConfig(particles(i).generateScanConfig(scannum)); 
         particleScan(:,i) = particles(i).ultraScan();
         [maxpS,maxpI]=max(particleScan(:,i));
         rotation(i)=maxbI-maxpI; %rotation matrix
@@ -175,57 +196,64 @@ while(converged == 0 && n < maxNumOfIterations) %%particle filter loop
     end
     
     %% Write code for scoring your particles    
+    if botSim.debug()
+        disp('scoring')
+    end
+    index=find(isfinite(sum(particleScan,1))==0);
+    particleScan(:,index)=[];
+    mparticleScan(:,index)=[];
+    rotation(index)=[];
+    particles(index)=[];
     
     particleScore=sqrt(sum((mparticleScan-botScan).^2,1));
-       %particleScore=vecnorm(mparticleScan-botScan); %does not work on school
-%    matlab
-%    
-%    particleScore = [];
-%     for i =1:num %for all the particles. 
-%         A=(mparticleScan(:,i)-botScan);
-%         %A=mparticleScan(:,i)./botScan;
-%         particleScore(i) = sqrt(dot(A,A)); %norm A
-%     end
-%     
+    particleScore=particleScore.^-1;
+    
+    prob=particleScore/sum(particleScore);
+    index = find(prob==0); %finds the indices which are 0
+    particleScore(index) = []; %remove infinites
+    particles(index)=[];%kill particles with inf. Outsiders!
+    rotation(index)=[]; %particles, its score, its rotation still the same
+    prob(index)=[];
+    
+    cumprob=cumsum(prob);
+
+    
     
     %% Write code for resampling your particles
-    mparticleScore=particleScore; %duplicate particle score
-    kill_list=zeros(num,1);    
-    finite_list=isfinite(particleScore);
-    index = find(finite_list==0); %finds the indices which are 0
-    mparticleScore(index) = []; %remove infinites
-    
-    
-    kill_list=particleScore>mean(mparticleScore); %kill particles further than mean
-    
-%     for i =1:num %for all the particles.
-%         %higher score is bad    
-%         if particleScore(i)>mean(mparticleScore)
-%             kill_list(i)=1;
-%         end
-%     end
-    respawn=sum(kill_list); %number to be respawned
-    index = find(kill_list==1); %finds the indices which are 1
-    particleScore(index) = [];
-    particles(index)=[]; %Kill Particles!
-    rotation(index)=[]; %maybe consider putting particles and rotation together but different datas
-    
-    
-    farthest=max(particleScore);
-    prob=1-particleScore/farthest;
-    prob=prob/sum(prob);
-    cumprob=cumsum(prob);
-    
-    for i=1:respawn %all the particles to respawn
-        index=find(rand<=cumprob,1);
-        position=particles(index).getBotPos();
-        heading=particles(index).getBotAng()+rotation(index)*pi/3+0.20*randn;
-        newparticle = BotSim(modifiedMap);
-        newparticle.setBotPos(position);
-        newparticle.setBotAng(heading);
-        particles=[particles;newparticle];
-    end    
-    
+    weight=zeros(num,1)+1;
+    newset(num,1)=BotSim;
+    U=1./num;
+    B=rand*2*max(prob);
+    if sum(cumprob)>0
+        if botSim.debug()
+            disp('respawning')
+        end
+        for i=1:num %all the particles to respawn
+            index=find(B<=cumprob,1);
+            B=B+U;
+            if B>1
+                B=B-1;
+            end
+            %index=find(rand<=cumprob,1);
+            position=particles(index).getBotPos()+0.1*rand(1,2);
+            heading=particles(index).getBotAng()+rotation(index)*2*pi/scannum+0.05*randn;
+            newset(i) = BotSim(modifiedMap);
+            newset(i).setBotPos(position);
+            newset(i).setBotAng(heading);
+            weight(i)=prob(index);
+        end
+    else
+        if botSim.debug()
+            disp('oops fuckup happened')
+        end
+        for i=1:num %all the particles to respawn
+            newset(i) = BotSim(modifiedMap);
+            newset(i).randomPose(5);
+            weight(i)=1;
+        end
+    end
+    particles=newset;
+    weight=weight/sum(weight); %returns prob total 1
     
     %% Write code to check for convergence   
     
@@ -237,21 +265,25 @@ while(converged == 0 && n < maxNumOfIterations) %%particle filter loop
     end
     
     %clust=kmeans(position,2);
-    botPosEs=mean(position);
-    botAngEs=mod(mean(heading),2*pi);
+    botPosEs=sum(position.*weight);
+    botAngEs=mod(sum(heading.*weight),2*pi);
     botPos=botSim.getBotPos();
     botAng=mod(botSim.getBotAng(),2*pi);
     
-    disp(n)
-    disp('where I think I am ')
-    disp(botPosEs)
-    disp(botAngEs)
-    disp('where I really am')
-    disp(botPos)
-    disp(botAng)
-    variance=norm(var(position))
-    derror=norm(botPosEs-botPos)       
-    herror=(botAngEs-botAng)/botAng        
+    if botSim.debug()
+        disp(n)
+        disp('where I think I am ')
+        disp(botPosEs)
+        disp(botAngEs)
+        disp('where I really am')
+        disp(botPos)
+        disp(botAng)
+        variance=norm(var(position))
+        derror=norm(botPosEs-botPos)       
+        herror=(botAngEs-botAng)/botAng        
+        xydistrib=norm(botPosEs-mean(position)) %this can work as convergence!disp('scoring')
+        
+    end  
     
     %% Write code to take a percentage of your particles and respawn in randomised locations (important for robustness)	
     five=floor(0.05*num);
@@ -265,16 +297,89 @@ while(converged == 0 && n < maxNumOfIterations) %%particle filter loop
     
     %% Write code to decide how to move next
     
-    Z=target-botPosEs;
-    targetdist=norm(Z);
-    targetdir=atan(Z(2)/Z(1))-mean(heading);
+    confident=0;
+    if and(xydistrib<1, variance<100)
+        confident =1; % the bot knows where it is! I hope
+    end
     
-    if mod(n,3)==1
-        turn = (maxbI-1)*pi/3;
-        move = min([maxbS-10,50]); 
+    if confident==0
+        if botSim.debug()
+            disp('localising')
+        end
+        %robot is lost
+        %move randomly to localize
+        if mod(cycle,4)==0
+            turn = (maxbI-1)*2*pi/scannum;
+            move = min([maxbS-10,30]); 
+        else
+            turn=0.5;
+            move= 5;
+        end
+        cycle=cycle+1;
     else
-        turn = min([targetdir,1]);
-        move = 2;
+        %robot kinda knows where it is
+        %Lets try djestra or whatever
+        %A* from there
+        %nodes are roompos
+        cycle=0;
+        %find out robo room
+         
+        [robodist,roboroom]=pdist2(roompos,botPosEs,'euclidean','Smallest',1);
+        
+        
+        
+        %head to nearest node
+        if robodist>3
+            travelto=roompos(roboroom,:);
+        else
+            if roboroom==targetroom
+                travelto=target;
+                converged=1;
+                if botSim.debug()
+                    disp('huzzah!!!')
+                    travelto
+                end
+            else
+                travelto=roompos(djmatrix(current,2),:);
+            end
+        end
+        
+        Z=travelto-botPosEs;
+        Zdist=norm(Z);
+        Zdir=atan2(Z(2),Z(1))-botAngEs;
+                
+        move=Zdist;
+        turn=Zdir;
+        
+        if botSim.debug()
+            disp('attempting to move to')
+            travelto
+            move
+            turn
+        end
+        
+    end
+    
+    %collision detection
+    collide=botScan<10;
+    collision=1;
+    while collision==1
+        dir=mod(turn+2*pi,2*pi)/(2*pi/scannum);
+        dir=round(dir+1);
+        if dir<1
+            dir=dir+6;
+        end
+        if dir>6
+            dir=dir-6;
+        end
+        
+        if collide(dir)
+            turn=rand*2*pi;
+            move=2;
+        else
+            collision=0;
+        end
+            
     end
     
     botSim.turn(turn); %turn the real robot.  
@@ -294,12 +399,15 @@ while(converged == 0 && n < maxNumOfIterations) %%particle filter loop
         for i =1:num
             particles(i).drawBot(3); %draw particle with line length 3 and default color
         end
+        
+        %mostly because I do not know how to draw an x
         targetp.drawBot(10,'r');
         for i =1:size(roompos,1)
             roomparts(i).drawBot(7, 'm'); %draw particle with line length 3 and default color
         end
         drawnow;
     end
+    
 end
 
 
